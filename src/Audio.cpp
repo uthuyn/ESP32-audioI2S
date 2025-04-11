@@ -499,6 +499,60 @@ bool Audio::openai_speech(const String& api_key, const String& model, const Stri
     return res;
 }
 
+bool Audio::omspeech(const char* host,const char* path, const char* token, int port, const char* speech, const char* lang) {
+    xSemaphoreTakeRecursive(mutex_playAudioData, 0.3 * configTICK_RATE_HZ);
+
+    setDefaults();
+    x_ps_free(&m_speechtxt);
+    m_speechtxt = x_ps_strdup(speech);
+    char* urlStr = urlencode(speech, false); // percent encoding
+    if(!urlStr) {
+        log_e("out of memory");
+        xSemaphoreGiveRecursive(mutex_playAudioData);
+        return false;
+    }
+    // 300 = strlen(host)+ strlen(path)+ strlen(token) + 200;
+    char* resp = x_ps_calloc(strlen(urlStr) + 300, 1);
+    strcat(resp, "GET ");
+    strcat(resp, path);
+    strcat(resp, "?lang=");
+    strcat(resp, lang);
+    strcat(resp, "&client=box-v1&text=");
+    strcat(resp, urlStr);
+    strcat(resp, " HTTP/1.1\r\n");
+    strcat(resp, "Host: ");
+    strcat(resp, host);
+    strcat(resp, "\r\n");
+    strcat(resp, "User-Agent: MedicBox/1.0 \r\n");
+    strcat(resp, "Authorization: ");
+    strcat(resp, token);
+    strcat(resp, "\r\n");
+    //strcat(resp, "Accept-Encoding: identity\r\n");
+    //strcat(resp, "Accept: text/html\r\n");
+    strcat(resp, "Connection: close\r\n\r\n");
+
+    x_ps_free(&urlStr);
+    _client = static_cast<WiFiClient*>(&client);
+    AUDIO_INFO("connect to \"%s\"", host);
+    AUDIO_INFO("connect to \"%s\"", resp);
+    if(!_client->connect(host, port)) {
+        log_e("Connection failed");
+        xSemaphoreGiveRecursive(mutex_playAudioData);
+        return false;
+    }
+    _client->print(resp);
+
+    m_streamType = ST_WEBFILE;
+    m_f_running = true;
+    m_f_ssl = false;
+    m_f_tts = true;
+    m_dataMode = HTTP_RESPONSE_HEADER;
+    x_ps_free(&m_lastHost); m_lastHost = x_ps_strdup(host);
+    xSemaphoreGiveRecursive(mutex_playAudioData);
+    x_ps_free(&resp);
+    return true;
+}
+
 //------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 bool Audio::connecttohost(const char* host, const char* user, const char* pwd) { // user and pwd for authentification only, can be empty
 
