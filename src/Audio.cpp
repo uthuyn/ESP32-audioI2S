@@ -535,7 +535,7 @@ bool Audio::omspeech(const char* host,const char* path, const char* token, int p
     _client = static_cast<WiFiClient*>(&client);
     AUDIO_INFO("connect to \"%s\"", host);
     AUDIO_INFO("connect to \"%s\"", resp);
-    if(!_client->connect(host, port)) {
+    if(!_client->connect(host, port, 10000)) {
         log_e("Connection failed");
         xSemaphoreGiveRecursive(mutex_playAudioData);
         return false;
