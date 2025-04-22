@@ -523,16 +523,16 @@ bool Audio::omspeech(const char* host,const char* path, const char* token, int p
     strcat(resp, "Host: ");
     strcat(resp, host);
     strcat(resp, "\r\n");
-    strcat(resp, "User-Agent: MedicBox/1.0 \r\n");
+    strcat(resp, "User-Agent: MedicBox/1.0\r\n");
     strcat(resp, "Authorization: ");
     strcat(resp, token);
     strcat(resp, "\r\n");
-    //strcat(resp, "Accept-Encoding: identity\r\n");
-    //strcat(resp, "Accept: text/html\r\n");
+    strcat(resp, "Accept-Encoding: identity;q=1,*;q=0\r\n");
+    strcat(resp, "Accept: text/html\r\n");
     strcat(resp, "Connection: close\r\n\r\n");
 
     x_ps_free(&urlStr);
-    _client = static_cast<WiFiClient*>(&client);
+    _client = static_cast<WiFiClient*>(&clientsecure);
     AUDIO_INFO("connect to \"%s\"", host);
     AUDIO_INFO("connect to \"%s\"", resp);
     if(!_client->connect(host, port, 10000)) {
@@ -540,12 +540,13 @@ bool Audio::omspeech(const char* host,const char* path, const char* token, int p
         xSemaphoreGiveRecursive(mutex_playAudioData);
         return false;
     }
-    _client->print(resp);
-
-    m_streamType = ST_WEBFILE;
     m_f_running = true;
-    m_f_ssl = false;
-    m_f_tts = true;
+    _client->print(resp);
+    m_expectedPlsFmt = FORMAT_NONE;
+    m_expectedCodec  = CODEC_MP3;
+    m_streamType = ST_WEBSTREAM;
+    m_f_ssl = true;
+    m_f_tts = false;
     m_dataMode = HTTP_RESPONSE_HEADER;
     x_ps_free(&m_lastHost); m_lastHost = x_ps_strdup(host);
     xSemaphoreGiveRecursive(mutex_playAudioData);
@@ -1014,9 +1015,9 @@ bool Audio::connecttospeech(const char* speech, const char* lang) {
 
     x_ps_free(&urlStr);
 
-    _client = static_cast<WiFiClient*>(&client);
+    _client = static_cast<WiFiClient*>(&clientsecure);
     AUDIO_INFO("connect to \"%s\"", host);
-    if(!_client->connect(host, 80)) {
+    if(!_client->connect(host, 443, 5000)) {
         log_e("Connection failed");
         xSemaphoreGiveRecursive(mutex_playAudioData);
         return false;
@@ -1025,7 +1026,7 @@ bool Audio::connecttospeech(const char* speech, const char* lang) {
 
     m_streamType = ST_WEBFILE;
     m_f_running = true;
-    m_f_ssl = false;
+    m_f_ssl = true;
     m_f_tts = true;
     m_dataMode = HTTP_RESPONSE_HEADER;
     x_ps_free(&m_lastHost); m_lastHost = x_ps_strdup(host);
@@ -5925,8 +5926,10 @@ boolean Audio::streamDetection(uint32_t bytesAvail) {
                 m_f_running = false;
                 m_dataMode = AUDIO_NONE;
             } else {
-                AUDIO_INFO("Stream lost -> try new connection");
-                connecttohost(m_lastHost);
+                AUDIO_INFO("Stream lost -> try new connection: NONE");
+                m_f_running = false;
+                m_dataMode = AUDIO_NONE;
+                // connecttohost(m_lastHost);
             }
             return true;
         }
