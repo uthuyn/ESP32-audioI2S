@@ -1017,7 +1017,7 @@ bool Audio::connecttospeech(const char* speech, const char* lang) {
 
     _client = static_cast<WiFiClient*>(&clientsecure);
     AUDIO_INFO("connect to \"%s\"", host);
-    if(!_client->connect(host, 443, 5000)) {
+    if(!_client->connect(host, 443, 7000)) {
         log_e("Connection failed");
         xSemaphoreGiveRecursive(mutex_playAudioData);
         return false;
