@@ -499,11 +499,18 @@ bool Audio::openai_speech(const String& api_key, const String& model, const Stri
     return res;
 }
 
-
 bool Audio::omspeech(const char* host,const char* path, const char* token, int port, const char* speech, const char* lang) {
     xSemaphoreTakeRecursive(mutex_playAudioData, 0.3 * configTICK_RATE_HZ);
-
+    AUDIO_INFO("cpu core %d", xPortGetCoreID());
     setDefaults();
+    _client = static_cast<WiFiClient*>(&clientsecure);
+    AUDIO_INFO("connect to \"%s\"", host);
+    _client->setTimeout(m_timeout_ms_ssl);
+    if(!_client->connect(host, port)) {
+        log_e("Connection failed");
+        xSemaphoreGiveRecursive(mutex_playAudioData);
+        return false;
+    }
     x_ps_free(&m_speechtxt);
     m_speechtxt = x_ps_strdup(speech);
     char* urlStr = urlencode(speech, false); // percent encoding
@@ -513,45 +520,37 @@ bool Audio::omspeech(const char* host,const char* path, const char* token, int p
         return false;
     }
     // 300 = strlen(host)+ strlen(path)+ strlen(token) + 200;
-    char* resp = x_ps_calloc(strlen(urlStr) + 300, 1);
-    strcat(resp, "GET ");
-    strcat(resp, path);
-    strcat(resp, "?lang=");
-    strcat(resp, lang);
-    strcat(resp, "&client=box-v1&text=");
-    strcat(resp, urlStr);
-    strcat(resp, " HTTP/1.1\r\n");
-    strcat(resp, "Host: ");
-    strcat(resp, host);
-    strcat(resp, "\r\n");
-    strcat(resp, "User-Agent: MedicBox/1.0\r\n");
-    strcat(resp, "Authorization: ");
-    strcat(resp, token);
-    strcat(resp, "\r\n");
-    strcat(resp, "Accept-Encoding: identity;q=1,*;q=0\r\n");
-    strcat(resp, "Accept: text/html\r\n");
-    strcat(resp, "Connection: keep-alive\r\n\r\n");
-
+    char* request = x_ps_calloc(strlen(urlStr) + 300, 1);
+    strcat(request, "GET ");
+    strcat(request, path);
+    strcat(request, "?lang=");
+    strcat(request, lang);
+    strcat(request, "&client=box-v1&text=");
+    strcat(request, urlStr);
+    strcat(request, " HTTP/1.1\r\n");
+    strcat(request, "Host: ");
+    strcat(request, host);
+    strcat(request, "\r\n");
+    strcat(request, "User-Agent: MedicBox/1.0\r\n");
+    strcat(request, "Authorization: ");
+    strcat(request, token);
+    strcat(request, "\r\n");
+    strcat(request, "Accept-Encoding: identity;q=1,*;q=0\r\n");
+    strcat(request, "Accept: text/html\r\n");
+    strcat(request, "Connection: keep-alive\r\n\r\n");
     x_ps_free(&urlStr);
-    _client = static_cast<WiFiClient*>(&clientsecure);
-    AUDIO_INFO("connect to \"%s\"", host);
-    AUDIO_INFO("connect to \"%s\"", resp);
-    if(!_client->connect(host, port, 7500)) {
-        log_e("Connection failed");
-        xSemaphoreGiveRecursive(mutex_playAudioData);
-        return false;
-    }
+    AUDIO_INFO("connect to \"%s\"", request);
     m_f_running = true;
     m_f_ssl = true;
     m_f_tts = false;
-    _client->print(resp);
+    _client->print(request);
     m_expectedCodec  = CODEC_MP3;
     m_expectedPlsFmt = FORMAT_NONE;
     m_dataMode = HTTP_RESPONSE_HEADER;
     m_streamType = ST_WEBFILE;
     x_ps_free(&m_lastHost); m_lastHost = x_ps_strdup(host);
     xSemaphoreGiveRecursive(mutex_playAudioData);
-    x_ps_free(&resp);
+    x_ps_free(&request);
     return true;
 }
 
@@ -1018,7 +1017,7 @@ bool Audio::connecttospeech(const char* speech, const char* lang) {
 
     _client = static_cast<WiFiClient*>(&clientsecure);
     AUDIO_INFO("connect to \"%s\"", host);
-    if(!_client->connect(host, 443, 7000)) {
+    if(!_client->connect(host, 443, 5000)) {
         log_e("Connection failed");
         xSemaphoreGiveRecursive(mutex_playAudioData);
         return false;
@@ -3298,7 +3297,7 @@ void Audio::processWebStream() {
         readMetadata(0, true); // reset all static vars
     }
     uint32_t availableBytes = _client->available(); // available from stream
-
+    AUDIO_INFO("Webstream: content length %d", availableBytes);
     // chunked data tramsfer - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(m_f_chunked && availableBytes) {
         uint8_t readedBytes = 0;
@@ -3365,6 +3364,7 @@ void Audio::processWebFile() {
 
 
     uint32_t availableBytes = _client->available(); // available from stream
+    AUDIO_INFO("Webfile: available bytes=%d, controlCounter=%d ", availableBytes, m_controlCounter);
 
     // chunked data tramsfer - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(m_f_chunked && availableBytes) {
@@ -3375,7 +3375,6 @@ void Audio::processWebFile() {
         }
         availableBytes = min(availableBytes, chunkSize - byteCounter);
     }
-
     if(!m_contentlength && !chunkSize) {
         log_e("webfile is not chunked or is without contentlength!");
         stopSong();
@@ -3437,6 +3436,7 @@ void Audio::processWebFile() {
             x_ps_free(&m_speechtxt);
         }
         else {
+            _client->stop();
             AUDIO_INFO("End of webstream: \"%s\"", m_lastHost);
             if(audio_eof_stream) audio_eof_stream(m_lastHost);
         }
@@ -3738,8 +3738,8 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
     if(!m_lastHost) {log_e("m_lastHost is NULL"); return false;}
 
     uint32_t ctime = millis();
-    uint32_t timeout = 9000; // ms
-
+    uint32_t timeout = 4500; // ms
+    
     static uint32_t stime;
     static bool     f_time = false;
     if(_client->available() == 0) {
@@ -5920,7 +5920,7 @@ boolean Audio::streamDetection(uint32_t bytesAvail) {
     if(tmr_lost < millis()) {
         cnt_lost++;
         tmr_lost = millis() + 1000;
-        if(cnt_lost == 5) { // 5s no data?
+        if(cnt_lost == 10) { // 10s no data?
             cnt_lost = 0;
             if (String(m_lastHost) == "api.openai.com") {
                 AUDIO_INFO("End of Stream.");
