@@ -499,6 +499,7 @@ bool Audio::openai_speech(const String& api_key, const String& model, const Stri
     return res;
 }
 
+
 bool Audio::omspeech(const char* host,const char* path, const char* token, int port, const char* speech, const char* lang) {
     xSemaphoreTakeRecursive(mutex_playAudioData, 0.3 * configTICK_RATE_HZ);
 
@@ -529,25 +530,25 @@ bool Audio::omspeech(const char* host,const char* path, const char* token, int p
     strcat(resp, "\r\n");
     strcat(resp, "Accept-Encoding: identity;q=1,*;q=0\r\n");
     strcat(resp, "Accept: text/html\r\n");
-    strcat(resp, "Connection: close\r\n\r\n");
+    strcat(resp, "Connection: keep-alive\r\n\r\n");
 
     x_ps_free(&urlStr);
     _client = static_cast<WiFiClient*>(&clientsecure);
     AUDIO_INFO("connect to \"%s\"", host);
     AUDIO_INFO("connect to \"%s\"", resp);
-    if(!_client->connect(host, port, 10000)) {
+    if(!_client->connect(host, port, 7500)) {
         log_e("Connection failed");
         xSemaphoreGiveRecursive(mutex_playAudioData);
         return false;
     }
     m_f_running = true;
-    _client->print(resp);
-    m_expectedPlsFmt = FORMAT_NONE;
-    m_expectedCodec  = CODEC_MP3;
-    m_streamType = ST_WEBSTREAM;
     m_f_ssl = true;
     m_f_tts = false;
+    _client->print(resp);
+    m_expectedCodec  = CODEC_MP3;
+    m_expectedPlsFmt = FORMAT_NONE;
     m_dataMode = HTTP_RESPONSE_HEADER;
+    m_streamType = ST_WEBFILE;
     x_ps_free(&m_lastHost); m_lastHost = x_ps_strdup(host);
     xSemaphoreGiveRecursive(mutex_playAudioData);
     x_ps_free(&resp);
@@ -3737,7 +3738,7 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
     if(!m_lastHost) {log_e("m_lastHost is NULL"); return false;}
 
     uint32_t ctime = millis();
-    uint32_t timeout = 4500; // ms
+    uint32_t timeout = 9000; // ms
 
     static uint32_t stime;
     static bool     f_time = false;
